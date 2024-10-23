@@ -21,21 +21,44 @@ YTDL_FORMAT_OPTIONS = {
     'no_warnings': True,
     'default_search': 'auto',
     'source_address': '0.0.0.0',
-    'extract_flat': False
+    'extract_flat': False,
+    
+    # Authentication options
+    'username': 'oauth',  # Use OAuth authentication
+    'password': '',       # Password should be empty for OAuth
 }
 
+# INITIAL_PLAYLIST_YTDL_FORMAT_OPTIONS = {
+#     'format': 'bestaudio/best',
+#     'extract_flat': 'playlist',  # Only extract basic info for playlist items
+#     'quiet': True,
+#     'no_warnings': True,
+#     'ignoreerrors': True,  # Don't stop on errors
+#     'nocheckcertificate': True,
+#     'skip_download': True,
+#     'lazy_playlist': False,  # Load full playlist
+#     'extract_flat': True,  # Only get basic info first
+#     'force_generic_extractor': False,
+#     # 'extract_flat': 'playlist',  # Get playlist info without downloading
+#     'extractor_args': {
+#         'youtube': {
+#             'skip': ['dash', 'hls'],
+#             'player_skip': ['webpage', 'js'],
+#             'player_client': ['android', 'web'],
+#         }
+#     }
+# }
+
+
 INITIAL_PLAYLIST_YTDL_FORMAT_OPTIONS = {
-    'format': 'bestaudio/best',
-    'extract_flat': 'playlist',  # Only extract basic info for playlist items
-    'quiet': True,
-    'no_warnings': True,
-    'ignoreerrors': True,  # Don't stop on errors
-    'nocheckcertificate': True,
+    **YTDL_FORMAT_OPTIONS,
+    'extract_flat': 'playlist',
+    'playlist_items': '1-100',
+    'ignore_no_formats_error': True,
+    'ignoreerrors': True,
     'skip_download': True,
     'lazy_playlist': False,  # Load full playlist
-    'extract_flat': True,  # Only get basic info first
     'force_generic_extractor': False,
-    # 'extract_flat': 'playlist',  # Get playlist info without downloading
     'extractor_args': {
         'youtube': {
             'skip': ['dash', 'hls'],
