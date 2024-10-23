@@ -21,26 +21,45 @@ class Music(commands.Cog):
     async def _handle_playback_complete(self, ctx, error):
         """Handle completion of track playback."""
         logger.info("Playback complete handler triggered")
-        if error:
-            logger.error(f"Playback error: {str(error)}")
-        
+        should_play_next = False
+
         async with self._lock:
-            queue = self.queue_manager.get_queue(ctx.guild.id)
-            if queue.queue:
-                logger.info("More tracks in queue")
-                should_play_next = True
-            else:
-                logger.info("Queue is empty")
-                queue.is_playing = False
-                queue.current_track = None
+            try:
+                if error:
+                    logger.error(f"Playback completed with error: {str(error)}")
+                    await ctx.send(f"❌ An error occurred while playing: {str(error)}")
+                else:
+                    logger.info("Playback completed successfully")
+
+                queue = self.queue_manager.get_queue(ctx.guild.id)
+                
+                # Check if we should play next track
+                if queue.queue:
+                    logger.info("More tracks in queue")
+                    should_play_next = True
+                else:
+                    logger.info("Queue is empty, stopping playback")
+                    queue.is_playing = False
+                    queue.current_track = None
+
+            except Exception as e:
+                logger.error(f"Error in playback complete handler: {str(e)}")
                 should_play_next = False
 
+        # Call play_next outside the lock if needed
         if should_play_next:
-            await self.play_next(ctx)
-
+            try:
+                logger.info("Starting next track")
+                await self.play_next(ctx)
+            except Exception as e:
+                logger.error(f"Error starting next track: {str(e)}")
+                
     async def play_next(self, ctx):
         """Play the next track in queue."""
         logger.info("Entering play_next method")
+        next_track = None
+        
+        # Get next track with lock
         async with self._lock:
             logger.info("Lock acquired in play_next")
             try:
@@ -69,26 +88,32 @@ class Music(commands.Cog):
                 return
 
         # Create player and start playback outside the lock
-        try:
-            player = await YTDLSource.from_track(next_track, loop=self.bot.loop)
-            
-            def after_playing(error):
-                if error:
-                    logger.error(f"Playback error: {str(error)}")
-                asyncio.run_coroutine_threadsafe(
-                    self._handle_playback_complete(ctx, error),
-                    self.bot.loop
-                )
+        if next_track:
+            try:
+                player = await YTDLSource.from_track(next_track, loop=self.bot.loop)
+                
+                def after_playing(error):
+                    if error:
+                        logger.error(f"Playback error: {str(error)}")
+                    asyncio.run_coroutine_threadsafe(
+                        self._handle_playback_complete(ctx, error),
+                        self.bot.loop
+                    )
 
-            ctx.voice_client.play(player, after=after_playing)
-            await ctx.send(f'🎵 Now playing: {player.title}')
-            logger.info(f"Successfully started playing: {player.title}")
-            
-        except Exception as e:
-            logger.error(f'Error during playback: {str(e)}')
-            await ctx.send(f'❌ Error playing track: {str(e)}')
-            await asyncio.sleep(1)
-            await self.play_next(ctx)
+                ctx.voice_client.play(player, after=after_playing)
+                await ctx.send(f'🎵 Now playing: {player.title}')
+                logger.info(f"Successfully started playing: {player.title}")
+                
+            except Exception as e:
+                logger.error(f'Error during playback: {str(e)}')
+                await ctx.send(f'❌ Error playing track: {str(e)}')
+                # Avoid potential deadlock by using create_task instead of direct call
+                asyncio.create_task(self._handle_error_retry(ctx))
+
+    async def _handle_error_retry(self, ctx):
+        """Handle retry after playback error."""
+        await asyncio.sleep(1)
+        await self.play_next(ctx)
 
     async def process_playlist(self, ctx, playlist_url: str):
         try:
@@ -190,40 +215,61 @@ class Music(commands.Cog):
             await ctx.send("❌ Could not connect to voice channel!")
             return
 
-        should_start_playing = False
-        track_added = False
+        try:
+            # Handle search result selection
+            if query.isdigit():
+                index = int(query) - 1
+                if ctx.guild.id in self.search_results and 0 <= index < len(self.search_results[ctx.guild.id]):
+                    selected_video = self.search_results[ctx.guild.id][index]
+                    query = selected_video['url']  # Use the URL from search results
+                else:
+                    await ctx.send("❌ Invalid search result number or no recent search results!")
+                    return
 
-        # Handle queue operations with lock
-        async with self._lock:
-            try:
-                queue = self.queue_manager.get_queue(ctx.guild.id)
-                logger.info(f"Current queue length: {len(queue.queue)}")
-
-                # Process the track
-                track_info = await self.youtube_service.process_url(query)
-                queue.add_track(Track(**track_info))
-                track_added = True
-                await ctx.send(f"Added to queue: {track_info['title']}")
-                logger.info(f"Added track to queue: {track_info['title']}")
-
-                # Check if we should start playing
-                should_start_playing = not queue.is_playing
-                if should_start_playing:
-                    queue.is_playing = True
-                    logger.info("Will start playback")
-
-            except Exception as e:
-                logger.error(f"Error processing track: {str(e)}")
-                await ctx.send(f"❌ Error: {str(e)}")
+            # Check if this is a playlist URL
+            if "playlist" in query or "list=" in query:
+                logger.info("Playlist URL detected, processing playlist...")
+                await self.process_playlist(ctx, query)
                 return
 
-        # Start playback outside the lock if needed
-        if track_added and should_start_playing:
-            logger.info("Starting playback process")
-            await self.play_next(ctx)
-        elif track_added:
-            logger.info("Track added to queue (already playing)")
+            # Handle single track
+            should_start_playing = False
+            track_added = False
 
+            # Handle queue operations with lock
+            async with self._lock:
+                try:
+                    queue = self.queue_manager.get_queue(ctx.guild.id)
+                    logger.info(f"Current queue length: {len(queue.queue)}")
+
+                    # Process the track
+                    track_info = await self.youtube_service.process_url(query)
+                    queue.add_track(Track(**track_info))
+                    track_added = True
+                    await ctx.send(f"Added to queue: {track_info['title']}")
+                    logger.info(f"Added track to queue: {track_info['title']}")
+
+                    # Check if we should start playing
+                    should_start_playing = not queue.is_playing
+                    if should_start_playing:
+                        queue.is_playing = True
+                        logger.info("Will start playback")
+
+                except Exception as e:
+                    logger.error(f"Error processing track: {str(e)}")
+                    await ctx.send(f"❌ Error: {str(e)}")
+                    return
+
+            # Start playback outside the lock if needed
+            if track_added and should_start_playing:
+                logger.info("Starting playback process")
+                await self.play_next(ctx)
+            elif track_added:
+                logger.info("Track added to queue (already playing)")
+
+        except Exception as e:
+            logger.error(f"Error in play command: {str(e)}")
+            await ctx.send(f'❌ Error: {str(e)}')
 
     @commands.command(name='search')
     async def search(self, ctx, *, query):

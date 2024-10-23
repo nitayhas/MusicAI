@@ -53,76 +53,23 @@ class YouTubeService:
                         return None
             
             return None
-        
-    def _get_best_audio_format(self, formats: List[Dict]) -> Optional[Dict]:
-        """Select the best audio format based on specific criteria."""
-        audio_formats = []
-        
-        for f in formats:
-            # Check if it's an audio-only format
-            if (f.get('acodec', 'none') != 'none' and 
-                f.get('vcodec') in ['none', None]):
-                
-                # Calculate format score
-                score = 0
-                # Prefer certain codecs
-                if f.get('acodec') == 'mp3':
-                    score += 100
-                elif f.get('acodec') == 'aac':
-                    score += 90
-                
-                # Higher bitrate is better (up to 192kbps)
-                abr = f.get('abr', 0)
-                if abr <= 192:
-                    score += abr / 2
-                else:
-                    score += 96 - (abr - 192) / 4
-                
-                # Higher sample rate is better (up to 44100)
-                asr = f.get('asr', 0)
-                if asr <= 44100:
-                    score += asr / 1000
-                
-                audio_formats.append((f, score))
-
-        if not audio_formats:
-            return None
-
-        # Sort by score and return the best format
-        return max(audio_formats, key=lambda x: x[1])[0]
 
     async def process_url(self, query: str) -> Optional[Dict]:
-        """Process a URL or search query and return track information."""
+        """Process a single URL or search query."""
         try:
-            # Extract info
             info = await asyncio.get_event_loop().run_in_executor(
                 self.thread_pool,
                 lambda: self.ytdl.extract_info(
-                    query if query.startswith('http') else f"ytsearch:{query}",
+                    query if query.startswith('http') else f"ytsearch:{query}", 
                     download=False
                 )
             )
-
+            
             if 'entries' in info:
                 info = info['entries'][0]
-
-            # Get best audio format
-            best_format = self._get_best_audio_format(info.get('formats', []))
-            if best_format:
-                logger.info(f"Selected audio format: {best_format.get('format_id')} "
-                          f"(codec: {best_format.get('acodec')}, "
-                          f"bitrate: {best_format.get('abr')}kbps)")
-            else:
-                logger.warning("No specific audio format found, using default stream URL")
-
-            return {
-                'title': info.get('title', 'Unknown Title'),
-                'url': info.get('webpage_url', info.get('url')),
-                'duration': info.get('duration', 0),
-                'thumbnail': info.get('thumbnail'),
-                'stream_url': best_format.get('url') if best_format else info.get('url')
-            }
-
+                
+            return self._format_track_info(info)
+            
         except Exception as e:
             logger.error(f"Error processing URL: {str(e)}")
             raise
@@ -132,7 +79,7 @@ class YouTubeService:
         try:
             with youtube_dl.YoutubeDL(INITIAL_PLAYLIST_YTDL_FORMAT_OPTIONS) as local_ydl:
                 playlist_info = await asyncio.get_event_loop().run_in_executor(
-                    None,
+                    self.thread_pool,
                     lambda: local_ydl.extract_info(url, download=False)
                 )
             
