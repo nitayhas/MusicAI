@@ -2180,3 +2180,24 @@ discord.ext.commands.errors.CommandInvokeError: Command raised an exception: Typ
 2024-10-23 03:18:23,858 - discord.voice_state - INFO - Voice connection complete.
 2024-10-23 03:18:26,638 - music_bot - ERROR - Error in play command: type object 'YTDLSource' has no attribute 'create'
 2024-10-23 03:19:10,619 - discord.voice_state - INFO - The voice handshake is being terminated for Channel ID 699343480912347220 (Guild ID 699343480912347216)
+2024-10-23 03:19:12,736 - discord.client - INFO - logging in using static token
+2024-10-23 03:19:14,045 - discord.gateway - INFO - Shard ID None has connected to Gateway (Session ID: 0f043eab415b98146e687001c886df73).
+2024-10-23 03:19:15,703 - discord.voice_state - INFO - Connecting to voice...
+2024-10-23 03:19:15,703 - discord.voice_state - INFO - Starting voice handshake... (connection attempt 1)
+2024-10-23 03:19:16,014 - discord.voice_state - INFO - Voice handshake complete. Endpoint found: tel-aviv10004.discord.media
+2024-10-23 03:19:16,047 - music_bot - INFO - Bot is ready! Logged in as MusicAI
+2024-10-23 03:19:16,704 - discord.voice_state - INFO - Voice connection complete.
+2024-10-23 03:19:26,021 - music_bot - INFO - Play command received with query: מושיקו תצא מהארון
+2024-10-23 03:19:26,022 - music_bot - INFO - Current queue length: 0
+2024-10-23 03:19:30,032 - music_bot - INFO - Selected audio format: 140 (codec: mp4a.40.2, bitrate: 129.504kbps)
+2024-10-23 03:19:30,328 - music_bot - INFO - Added track to queue: מאור גמליאל - מושיקו תצא מהארון
+2024-10-23 03:19:30,328 - music_bot - INFO - Will start playback
+2024-10-23 03:19:30,329 - music_bot - INFO - Starting playback process
+2024-10-23 03:19:30,329 - music_bot - INFO - Entering play_next method
+2024-10-23 03:19:30,330 - music_bot - INFO - Lock acquired in play_next
+2024-10-23 03:19:30,330 - music_bot - INFO - Got queue from queue manager
+2024-10-23 03:19:30,330 - music_bot - INFO - Preparing to play: מאור גמליאל - מושיקו תצא מהארון
+2024-10-23 03:19:30,628 - music_bot - INFO - Successfully started playing: מאור גמליאל - מושיקו תצא מהארון
+2024-10-23 03:22:09,777 - discord.player - INFO - ffmpeg process 20820 successfully terminated with return code of 0.
+2024-10-23 03:22:09,778 - music_bot - INFO - Playback complete handler triggered
+2024-10-23 03:22:09,778 - music_bot - INFO - Queue is empty
