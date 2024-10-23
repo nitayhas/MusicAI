@@ -3,6 +3,8 @@ import discord
 from discord.ext import commands
 from config.settings import TOKEN, COMMAND_PREFIX
 from config.logging_config import setup_logging
+from utils.resource_monitor import ResourceMonitor
+
 
 logger = setup_logging()
 
@@ -24,6 +26,9 @@ async def main():
     async with bot:
         await load_extensions()
         await bot.start(TOKEN)
+    # In your bot's setup
+    monitor = ResourceMonitor()
+    monitor.start()
 
 if __name__ == '__main__':
     asyncio.run(main())

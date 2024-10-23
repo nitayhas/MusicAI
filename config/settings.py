@@ -52,6 +52,6 @@ FFMPEG_OPTIONS = {
 }
 
 # Playlist processing settings
-MAX_WORKERS = 25
+MAX_WORKERS = 5
 CHUNK_SIZE = 5
 MAX_SEARCH_RESULTS = 5
