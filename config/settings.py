@@ -7,6 +7,7 @@ load_dotenv()
 # Bot settings
 COMMAND_PREFIX = '!'
 TOKEN = os.getenv('DISCORD_TOKEN')
+YOUTUBE_OAUTH_TOKEN = os.getenv('YOUTUBE_OAUTH_TOKEN')
 FFMPEG_PATH = os.getenv('FFMPEG_PATH')
 
 YTDL_FORMAT_OPTIONS = {
@@ -26,6 +27,7 @@ YTDL_FORMAT_OPTIONS = {
     # Authentication options
     'username': 'oauth',  # Use OAuth authentication
     'password': '',       # Password should be empty for OAuth
+    'oauth_token': YOUTUBE_OAUTH_TOKEN,
 }
 
 # INITIAL_PLAYLIST_YTDL_FORMAT_OPTIONS = {

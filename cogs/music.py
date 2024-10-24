@@ -20,12 +20,17 @@ class Music(commands.Cog):
         self._lock = asyncio.Lock()  # Add lock for thread safety
         self._playback_locks = {}  # Dict to store per-guild playback locks
         self._current_players = {}  # Dict to store currently playing sources
+        self._cleanup_events = {}
 
     def _get_playback_lock(self, guild_id: int) -> asyncio.Lock:
         """Get or create a playback lock for a specific guild."""
         if guild_id not in self._playback_locks:
             self._playback_locks[guild_id] = asyncio.Lock()
         return self._playback_locks[guild_id]
+    
+    def schedule_callback(self, coro):
+        """Schedule a coroutine to run in the bot's event loop."""
+        asyncio.run_coroutine_threadsafe(coro, self.bot.loop)
 
     async def ensure_voice_client(self, ctx):
         """Ensure voice client is properly connected."""
@@ -35,7 +40,7 @@ class Music(commands.Cog):
             else:
                 raise ValueError("Not connected to a voice channel")
 
-    async def create_player(self, ctx, track) -> Optional[YTDLSource]:
+    async def create_player(self, ctx, track) -> Optional[discord.PCMVolumeTransformer]:
         """Create a player in a thread-safe manner."""
         guild_id = ctx.guild.id
         playback_lock = self._get_playback_lock(guild_id)
@@ -44,9 +49,8 @@ class Music(commands.Cog):
             try:
                 # Clean up existing player if any
                 if guild_id in self._current_players:
-                    old_player = self._current_players[guild_id]
                     try:
-                        old_player.cleanup()
+                        self._current_players[guild_id].cleanup()
                     except Exception as e:
                         logger.error(f"Error cleaning up old player: {e}")
 
@@ -78,21 +82,22 @@ class Music(commands.Cog):
         """Handle completion of track playback."""
         logger.info("Playback complete handler triggered")
         should_play_next = False
-        guild_id = ctx.guild.id
 
         async with self._lock:
             try:
                 if error:
                     logger.error(f"Playback completed with error: {str(error)}")
                     await ctx.send(f"❌ An error occurred while playing: {str(error)}")
-                
-                queue = self.queue_manager.get_queue(guild_id)
+                else:
+                    logger.info("Playback completed successfully")
+
+                queue = self.queue_manager.get_queue(ctx.guild.id)
                 
                 if queue.queue:
                     logger.info("More tracks in queue")
                     should_play_next = True
                 else:
-                    logger.info("Queue is empty, stopping playback")
+                    logger.info("Queue is empty")
                     queue.is_playing = False
                     queue.current_track = None
 
@@ -100,12 +105,8 @@ class Music(commands.Cog):
                 logger.error(f"Error in playback complete handler: {str(e)}")
                 should_play_next = False
 
-        # Start next track if needed
         if should_play_next:
-            try:
-                await self.play_next(ctx)
-            except Exception as e:
-                logger.error(f"Error starting next track: {str(e)}")
+            await self.play_next(ctx)
                 
     async def play_next(self, ctx):
         """Play the next track in queue."""
@@ -113,15 +114,12 @@ class Music(commands.Cog):
         next_track = None
         guild_id = ctx.guild.id
         
-        # Get next track with queue lock
         async with self._lock:
             try:
                 queue = self.queue_manager.get_queue(guild_id)
                 
-                try:
-                    await self.ensure_voice_client(ctx)
-                except ValueError as e:
-                    logger.error(f"Voice client error: {e}")
+                if not ctx.voice_client or not ctx.voice_client.is_connected():
+                    logger.error("Voice client is not properly connected")
                     queue.is_playing = False
                     return
 
@@ -139,37 +137,36 @@ class Music(commands.Cog):
                 logger.error(f'Error preparing playback: {str(e)}')
                 return
 
-        # Create and start player outside the queue lock
         if next_track:
             try:
-                # Create player with playback lock
                 player = await self.create_player(ctx, next_track)
                 if not player:
                     raise Exception("Failed to create player")
 
                 def after_playing(error):
+                    """Callback after track finishes playing."""
                     if error:
                         logger.error(f"Playback error: {str(error)}")
-                    # Clean up the player
-                    asyncio.create_task(self.cleanup_player(guild_id))
-                    # Handle playback completion
-                    asyncio.run_coroutine_threadsafe(
-                        self._handle_playback_complete(ctx, error),
-                        self.bot.loop
-                    )
+                    
+                    # Schedule the cleanup in the main event loop
+                    self.schedule_callback(self.cleanup_player(guild_id))
+                    
+                    # Schedule the completion handler
+                    self.schedule_callback(self._handle_playback_complete(ctx, error))
 
                 ctx.voice_client.play(player, after=after_playing)
                 await ctx.send(f'🎵 Now playing: {player.title}')
                 logger.info(f"Successfully started playing: {player.title}")
-                
+
             except Exception as e:
                 logger.error(f'Error during playback: {str(e)}')
                 await ctx.send(f'❌ Error playing track: {str(e)}')
-                await self.cleanup_player(guild_id)
-                asyncio.create_task(self._handle_error_retry(ctx))
+                # Schedule cleanup and retry
+                self.schedule_callback(self._handle_playback_error(ctx, guild_id))
 
-    async def _handle_error_retry(self, ctx):
-        """Handle retry after playback error."""
+    async def _handle_playback_error(self, ctx, guild_id: int):
+        """Handle playback error with proper cleanup."""
+        await self.cleanup_player(guild_id)
         await asyncio.sleep(1)
         await self.play_next(ctx)
 
