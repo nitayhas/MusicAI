@@ -241,7 +241,7 @@ class YouTubeService:
         
         # Use fewer threads on systems with limited resources
         max_workers = min(
-            25,  # Maximum workers
+            MAX_WORKERS,  # Maximum workers
             max(1, cpu_count // 2),  # Use half of CPU cores
             max(1, int(memory_gb))    # Or one thread per GB of RAM
         )
@@ -311,6 +311,7 @@ class YouTubeService:
                         return None
             
             return None
+        
     async def process_url(self, query: str) -> Optional[Dict]:
         """Process a single URL or search query."""
         try:
