@@ -11,7 +11,6 @@ YOUTUBE_OAUTH_TOKEN = os.getenv('YOUTUBE_OAUTH_TOKEN')
 FFMPEG_PATH = os.getenv('FFMPEG_PATH')
 
 YTDL_FORMAT_OPTIONS = {
-    'format': 'bestaudio/best',
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
     'restrictfilenames': True,
     'noplaylist': True,
@@ -21,8 +20,16 @@ YTDL_FORMAT_OPTIONS = {
     'quiet': True,
     'no_warnings': True,
     'default_search': 'auto',
-    'source_address': '0.0.0.0',
     'extract_flat': False,
+    # Network and quality options
+    'source_address': '0.0.0.0',
+    'preferredcodec': 'opus',
+    'preferredquality': '192',
+    # # Added for stability
+    # 'retries': 5,
+    # 'fragment_retries': 5,
+    # 'skip_unavailable_fragments': True,
+    # 'postprocessor_args': ['-threads', '1'],  # Single thread for stability
     
     # Authentication options
     'username': 'oauth',  # Use OAuth authentication
@@ -71,12 +78,25 @@ INITIAL_PLAYLIST_YTDL_FORMAT_OPTIONS = {
 }
 
 
+# Simplified FFmpeg options focusing on reliable audio playback
 FFMPEG_OPTIONS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn'
+    'before_options': (
+        '-reconnect 1 '              # Auto-reconnect if disconnected
+        '-reconnect_streamed 1 '     # Reconnect streamed resources
+        '-reconnect_delay_max 5 '    # Maximum delay before reconnect
+        '-nostdin '                  # Disable interaction
+        '-thread_queue_size 4096 '   # Increase buffer queue size
+        '-fflags +nobuffer '         # Avoid buffering (low-latency)
+    ),
+    'options': (
+        '-vn '                       # No video
+        '-ac 2 '                     # Stereo audio channels
+        '-b:a 192k '                 # Set a good audio bitrate (192kbps for music)
+        '-ar 48000 '                 # 48kHz sample rate (Discord standard)
+        '-loglevel error '           # Show only errors to reduce log noise
+    )
 }
 
-# Playlist processing settings
 MAX_WORKERS = 5
 CHUNK_SIZE = 5
 MAX_SEARCH_RESULTS = 5

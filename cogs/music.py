@@ -5,7 +5,7 @@ from discord.ext import commands
 import asyncio
 from services.music_queue import QueueManager, Track
 from services.youtube import YouTubeService
-from utils.ytdl_source import YTDLSource
+from utils.ytdl_source import YTDLSource, auto_reconnect
 from config.settings import CHUNK_SIZE
 import logging
 
@@ -118,10 +118,13 @@ class Music(commands.Cog):
             try:
                 queue = self.queue_manager.get_queue(guild_id)
                 
+                # Check voice client
                 if not ctx.voice_client or not ctx.voice_client.is_connected():
                     logger.error("Voice client is not properly connected")
-                    queue.is_playing = False
-                    return
+                    # Try to reconnect
+                    if not await auto_reconnect(ctx.voice_client, ctx.author.voice.channel):
+                        queue.is_playing = False
+                        return
 
                 if not queue.queue:
                     logger.info("Queue is empty")
@@ -137,32 +140,36 @@ class Music(commands.Cog):
                 logger.error(f'Error preparing playback: {str(e)}')
                 return
 
+        # Create player and start playback outside the lock
         if next_track:
             try:
-                player = await self.create_player(ctx, next_track)
+                # Create player
+                player = await YTDLSource.from_track(next_track, loop=self.bot.loop)
                 if not player:
                     raise Exception("Failed to create player")
 
                 def after_playing(error):
-                    """Callback after track finishes playing."""
                     if error:
                         logger.error(f"Playback error: {str(error)}")
-                    
-                    # Schedule the cleanup in the main event loop
-                    self.schedule_callback(self.cleanup_player(guild_id))
-                    
-                    # Schedule the completion handler
-                    self.schedule_callback(self._handle_playback_complete(ctx, error))
+                    # Schedule cleanup and next track
+                    asyncio.run_coroutine_threadsafe(
+                        self._handle_playback_complete(ctx, error),
+                        self.bot.loop
+                    )
 
+                # Set appropriate volume
+                player.volume = 1.0  # Ensure volume is at max
+
+                # Start playback
                 ctx.voice_client.play(player, after=after_playing)
                 await ctx.send(f'🎵 Now playing: {player.title}')
                 logger.info(f"Successfully started playing: {player.title}")
-
+                
             except Exception as e:
                 logger.error(f'Error during playback: {str(e)}')
                 await ctx.send(f'❌ Error playing track: {str(e)}')
-                # Schedule cleanup and retry
-                self.schedule_callback(self._handle_playback_error(ctx, guild_id))
+                await asyncio.sleep(1)
+                await self.play_next(ctx)
 
     async def _handle_playback_error(self, ctx, guild_id: int):
         """Handle playback error with proper cleanup."""
