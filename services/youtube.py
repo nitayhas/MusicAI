@@ -140,15 +140,16 @@
 import platform
 import aiohttp
 import asyncio
+import signal
 import psutil
-import os
+import traceback
+import sys
 from typing import Optional, Dict, List, Tuple
 import yt_dlp as youtube_dl
 from concurrent.futures import ThreadPoolExecutor
 from config.settings import YTDL_FORMAT_OPTIONS, INITIAL_PLAYLIST_YTDL_FORMAT_OPTIONS, MAX_WORKERS
 import threading
 import logging
-from functools import partial
 
 logger = logging.getLogger('music_bot')
 
@@ -204,6 +205,7 @@ class ResourceLimitedThreadPoolExecutor(ThreadPoolExecutor):
         self._active_tasks = 0
         self._lock = threading.Lock()
         self._memory_threshold = 500 * 1024 * 1024  # 500MB
+        self._shutdown_event = threading.Event()  # Event to signal shutdown
 
     def submit(self, fn, *args, **kwargs):
         with self._lock:
@@ -231,6 +233,17 @@ class ResourceLimitedThreadPoolExecutor(ThreadPoolExecutor):
         with self._lock:
             self._active_tasks -= 1
 
+    def shutdown(self, wait=True):
+        """Shutdown the thread pool."""
+        logger.info("Shutting down the thread pool executor")
+        self._shutdown_event.set()  # Signal shutdown
+        super().shutdown(wait=wait)
+
+def signal_handler(signal, frame, executor):
+    logger.info("Caught Ctrl+C! Attempting to shut down gracefully...")
+    executor.shutdown(wait=True)
+    sys.exit(0)
+
 class YouTubeService:
     def __init__(self, bot):
         self.bot = bot
@@ -252,6 +265,8 @@ class YouTubeService:
             max_workers=max_workers,
             thread_name_prefix='yt_worker'
         )
+        
+        signal.signal(signal.SIGINT, lambda s, f: signal_handler(s, f, self.thread_pool))
         
         self.ytdl = youtube_dl.YoutubeDL(YTDL_FORMAT_OPTIONS)
         self._extraction_semaphore = asyncio.Semaphore(3)  # Limit concurrent extractions
@@ -288,28 +303,34 @@ class YouTubeService:
             self._monitor_resources()
             tries = 0
             max_tries = 2
+            timeout_duration = 5  # Increased timeout duration
             while tries < max_tries:
                 try:
                     info = await asyncio.wait_for(
                         self.bot.loop.run_in_executor(
-                            self.thread_pool,
+                            None,
                             lambda: self.ytdl.extract_info(url, download=False)
                         ),
-                        timeout=10
+                        timeout=timeout_duration
                     )
-                    
+
                     if info:
                         return self._format_track_info(info)
                     return None
-                    
-                except (asyncio.TimeoutError, Exception) as e:
+
+                except asyncio.TimeoutError:
                     tries += 1
-                    logger.error(f"Error extracting video info: {str(e)}")
-                    if tries < max_tries and "age-restricted" not in str(e).lower():
-                        await asyncio.sleep(1)
-                    else:
-                        return None
-            
+                    logger.error(f"TimeoutError extracting video info for URL: {url}. Attempt {tries} of {max_tries}.")
+                    timeout_duration=timeout_duration*2
+                except asyncio.CancelledError:
+                    logger.error(f"CancelledError while extracting video info for URL: {url}.")
+                    raise  # Re-raise if you want the program to exit or stop further processing
+                except Exception as e:
+                    tries += 1
+                    logger.error(f"Error extracting video info: {str(e)} | for url: {url}")
+                    logger.error(f"Full traceback: {traceback.format_exc()}")
+                await asyncio.sleep(1)
+
             return None
         
     async def process_url(self, query: str) -> Optional[Dict]:
@@ -397,6 +418,6 @@ class YouTubeService:
     def __del__(self):
         """Cleanup resources."""
         try:
-            self.thread_pool.shutdown(wait=False)
+            self.thread_pool.shutdown()
         except Exception as e:
             logger.error(f"Error shutting down thread pool: {e}")

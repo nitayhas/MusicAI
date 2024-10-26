@@ -39,7 +39,6 @@ YTDL_FORMAT_OPTIONS = {
 
 INITIAL_PLAYLIST_YTDL_FORMAT_OPTIONS = {
     'format': 'bestaudio/best',
-    'extract_flat': 'playlist',  # Only extract basic info for playlist items
     'quiet': True,
     'no_warnings': True,
     'ignoreerrors': True,  # Don't stop on errors
@@ -48,6 +47,8 @@ INITIAL_PLAYLIST_YTDL_FORMAT_OPTIONS = {
     'lazy_playlist': False,  # Load full playlist
     'extract_flat': True,  # Only get basic info first
     'force_generic_extractor': False,
+    'flat_playlist': True,
+    # 'verbose': True,
 
     # Network and quality options
     'source_address': '0.0.0.0',
@@ -67,6 +68,7 @@ INITIAL_PLAYLIST_YTDL_FORMAT_OPTIONS = {
         }
     }
 }
+
 
 
 # INITIAL_PLAYLIST_YTDL_FORMAT_OPTIONS = {
