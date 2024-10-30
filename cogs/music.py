@@ -6,7 +6,8 @@ import asyncio
 from services.music_queue import QueueManager, Track
 from services.youtube import YouTubeService
 from utils.ytdl_source import YTDLSource, auto_reconnect
-from config.settings import CHUNK_SIZE
+from utils.music_recommender import MusicRecommender
+from config.settings import CHUNK_SIZE, LASTFM_API_KEY, LASTFM_API_SECRET, LASTFM_USERNAME, LASTFM_PASSWORD
 import logging
 
 logger = logging.getLogger('music_bot')
@@ -16,6 +17,13 @@ class Music(commands.Cog):
         self.bot = bot
         self.queue_manager = QueueManager()
         self.youtube_service = YouTubeService(bot=bot)
+        # Initialize the recommender
+        self.recommender = MusicRecommender(
+            api_key=LASTFM_API_KEY,
+            api_secret=LASTFM_API_SECRET,
+            username=LASTFM_USERNAME,
+            password_hash=LASTFM_PASSWORD
+        )
         self.search_results = {}
         self._lock = asyncio.Lock()  # Add lock for thread safety
         self._playback_locks = {}  # Dict to store per-guild playback locks
@@ -332,6 +340,40 @@ class Music(commands.Cog):
         except Exception as e:
             logger.error(f"Error in play command: {str(e)}")
             await ctx.send(f'❌ Error: {str(e)}')
+
+    @commands.command(name='similar')
+    async def find_similar(self, ctx, *, limit=5):
+        # Get the currently playing track
+        queue = self.queue_manager.get_queue(ctx.guild.id)
+        current_track = queue.current_track.title
+        logger.info(f"Find similar track to {current_track}")
+        try:
+            limit = int(limit)
+        except:
+            pass
+        
+        similar_tracks = self.recommender.get_similar_tracks(current_track, limit=limit)        
+        # Create an embed with recommendations
+        embed = discord.Embed(title="Similar Tracks")
+        # Handle queue operations with lock
+        async with self._lock:
+            await ctx.send(f"Start adding {len(similar_tracks)} similar tracks")
+            for track in similar_tracks:
+                try:
+                    embed.add_field(
+                        name=f"{track['artist']} - {track['title']}", 
+                        value=f"Similarity: {track['similarity_score']:.2f}", 
+                        inline=False
+                    )
+                    track_info = await self.youtube_service.process_url(f"{track['artist']} - {track['title']}")
+                    queue.add_track(Track(**track_info))
+                    logger.info(f"Added track to queue: {track_info['title']}")
+                except Exception as e:
+                    logger.error(f"Error processing track: {str(e)}")
+                    await ctx.send(f"❌ Error: {str(e)}")
+                    return
+                    
+        await ctx.send(embed=embed)
 
     @commands.command(name='search')
     async def search(self, ctx, *, query):

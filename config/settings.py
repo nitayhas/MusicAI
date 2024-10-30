@@ -1,4 +1,5 @@
 import os
+import pylast
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -9,6 +10,10 @@ COMMAND_PREFIX = '!'
 TOKEN = os.getenv('DISCORD_TOKEN')
 YOUTUBE_OAUTH_TOKEN = os.getenv('YOUTUBE_OAUTH_TOKEN')
 FFMPEG_PATH = os.getenv('FFMPEG_PATH')
+LASTFM_API_KEY = os.getenv('LASTFM_API_KEY')
+LASTFM_API_SECRET = os.getenv('LASTFM_API_SECRET')
+LASTFM_USERNAME = os.getenv('LASTFM_USERNAME')
+LASTFM_PASSWORD = pylast.md5(os.getenv('LASTFM_PASSWORD'))
 
 YTDL_FORMAT_OPTIONS = {
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
