@@ -417,7 +417,7 @@ class Music(commands.Cog):
             logger.error(f"Error in playnow command: {str(e)}")
             await ctx.send(f'❌ Error: {str(e)}')
 
-    @commands.command(name='similar')
+    @commands.command(name='radio', aliases=['r'])
     async def find_similar(self, ctx, *, limit=5):
         # Get the currently playing track
         queue = self.queue_manager.get_queue(ctx.guild.id)
@@ -451,7 +451,7 @@ class Music(commands.Cog):
                     
         await ctx.send(embed=embed)
 
-    @commands.command(name='search')
+    @commands.command(name='search', aliases=['s'])
     async def search(self, ctx, *, query: str):
         """Search for videos on YouTube and display results"""
         is_safe, sanitized_query, error_message = await sanitize_play_query(query, str(ctx.author.id))
@@ -487,7 +487,7 @@ class Music(commands.Cog):
             await ctx.send(f'❌ Error: {str(e)}')
 
 
-    @commands.command(name='queue')
+    @commands.command(name='queue', aliases=['q'])
     async def queue(self, ctx):
         """Display the current queue"""
         server_id = ctx.guild.id
@@ -620,7 +620,7 @@ class Music(commands.Cog):
             name="📋 Queue Management",
             value="""
     `!queue`: Display current queue
-    `!similar` `[number]`: Add similar songs to current track (default: 5)
+    `!radio` (or `!r`) `[number]`: Add radio songs to current track (default: 5)
     """,
             inline=False
         )
