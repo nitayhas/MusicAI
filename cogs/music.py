@@ -132,7 +132,8 @@ class Music(commands.Cog):
                     logger.error("Voice client is not properly connected")
                     # Try to reconnect
                     if not await auto_reconnect(ctx.voice_client, ctx.author.voice.channel):
-                        queue.is_playing = False
+                        await self.leave(ctx)
+                        # queue.is_playing = False
                         return
 
                 if not queue.queue:
