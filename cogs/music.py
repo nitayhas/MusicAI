@@ -264,22 +264,12 @@ class Music(commands.Cog):
             queue.playlist_processing = False
 
 
-    @commands.command(name='play')
-    async def play(self, ctx, *, query: str):
-        """Play a song by URL, search result number, or playlist URL"""
-        logger.info(f"Play command received with query: {query}")
-
-        is_safe, sanitized_query, error_message = await sanitize_play_query(query, str(ctx.author.id))
-        if not is_safe:
-            await ctx.send(f"Sanitizing results: {error_message}")
-            return
-        
-        # Check voice channel first
+    async def _ensure_voice_connection(self, ctx):
+        """Ensure bot is connected to the correct voice channel"""
         if not ctx.message.author.voice:
             await ctx.send("❌ You must be in a voice channel to play music!")
-            return
+            return False
 
-        # Handle voice connection first
         try:
             if ctx.voice_client is None:
                 await ctx.message.author.voice.channel.connect()
@@ -287,65 +277,144 @@ class Music(commands.Cog):
             elif ctx.voice_client.channel != ctx.message.author.voice.channel:
                 await ctx.voice_client.move_to(ctx.message.author.voice.channel)
                 logger.info("Moved to voice channel")
+            return True
         except Exception as e:
             logger.error(f"Voice connection error: {str(e)}")
             await ctx.send("❌ Could not connect to voice channel!")
+            return False
+
+    async def _handle_search_selection(self, ctx, query):
+        """Handle selection from search results"""
+        if not query.isdigit():
+            return query
+            
+        index = int(query) - 1
+        if ctx.guild.id in self.search_results and 0 <= index < len(self.search_results[ctx.guild.id]):
+            selected_video = self.search_results[ctx.guild.id][index]
+            return selected_video['url']
+        
+        await ctx.send("❌ Invalid search result number or no recent search results!")
+        return None
+
+    async def _process_track(self, ctx, query, position=None):
+        """Process a single track and add it to the queue
+        
+        Args:
+            ctx: Context
+            query: Search query or URL
+            position: Optional position to insert track (None for end of queue)
+        
+        Returns:
+            tuple: (track_info, should_start_playing)
+        """
+        async with self._lock:
+            try:
+                queue = self.queue_manager.get_queue(ctx.guild.id)
+                logger.info(f"Current queue length: {len(queue.queue)}")
+
+                track_info = await self.youtube_service.process_url(query)
+                track = Track(**track_info)
+
+                if position is not None:
+                    queue.queue.insert(position, track)
+                else:
+                    queue.add_track(track)
+
+                # Determine if we should start playing
+                should_start_playing = not queue.is_playing
+                if should_start_playing:
+                    queue.is_playing = True
+                    logger.info("Will start playback")
+
+                return track_info, should_start_playing
+
+            except Exception as e:
+                logger.error(f"Error processing track: {str(e)}")
+                await ctx.send(f"❌ Error: {str(e)}")
+                return None, False
+
+    @commands.command(name='play', aliases=['p'])
+    async def play(self, ctx, *, query: str):
+        """Play a song by URL, search result number, or playlist URL"""
+        logger.info(f"Play command received with query: {query}")
+
+        # Sanitize query
+        is_safe, sanitized_query, error_message = await sanitize_play_query(query, str(ctx.author.id))
+        if not is_safe:
+            await ctx.send(f"Sanitizing results: {error_message}")
+            return
+
+        # Check voice connection
+        if not await self._ensure_voice_connection(ctx):
             return
 
         try:
             # Handle search result selection
-            if query.isdigit():
-                index = int(query) - 1
-                if ctx.guild.id in self.search_results and 0 <= index < len(self.search_results[ctx.guild.id]):
-                    selected_video = self.search_results[ctx.guild.id][index]
-                    query = selected_video['url']  # Use the URL from search results
-                else:
-                    await ctx.send("❌ Invalid search result number or no recent search results!")
-                    return
+            query = await self._handle_search_selection(ctx, query)
+            if query is None:
+                return
 
-            # Check if this is a playlist URL
+            # Handle playlist
             if "playlist" in query or "list=" in query:
                 logger.info("Playlist URL detected, processing playlist...")
                 await self.process_playlist(ctx, query)
                 return
 
-            # Handle single track
-            should_start_playing = False
-            track_added = False
-
-            # Handle queue operations with lock
-            async with self._lock:
-                try:
-                    queue = self.queue_manager.get_queue(ctx.guild.id)
-                    logger.info(f"Current queue length: {len(queue.queue)}")
-
-                    # Process the track
-                    track_info = await self.youtube_service.process_url(query)
-                    queue.add_track(Track(**track_info))
-                    track_added = True
-                    await ctx.send(f"Added to queue: {track_info['title']}")
-                    logger.info(f"Added track to queue: {track_info['title']}")
-
-                    # Check if we should start playing
-                    should_start_playing = not queue.is_playing
-                    if should_start_playing:
-                        queue.is_playing = True
-                        logger.info("Will start playback")
-
-                except Exception as e:
-                    logger.error(f"Error processing track: {str(e)}")
-                    await ctx.send(f"❌ Error: {str(e)}")
-                    return
-
-            # Start playback outside the lock if needed
-            if track_added and should_start_playing:
-                logger.info("Starting playback process")
-                await self.play_next(ctx)
-            elif track_added:
-                logger.info("Track added to queue (already playing)")
+            # Process single track
+            track_info, should_start_playing = await self._process_track(ctx, query)
+            
+            if track_info:
+                await ctx.send(f"Added to queue: {track_info['title']}")
+                if should_start_playing:
+                    logger.info("Starting playback process")
+                    await self.play_next(ctx)
+                else:
+                    logger.info("Track added to queue (already playing)")
 
         except Exception as e:
             logger.error(f"Error in play command: {str(e)}")
+            await ctx.send(f'❌ Error: {str(e)}')
+
+    @commands.command(name='playnow', aliases=['pn'])
+    async def playnow(self, ctx, *, query: str):
+        """Play a song immediately by placing it at the start of the queue"""
+        logger.info(f"Play Now command received with query: {query}")
+
+        # Sanitize query
+        is_safe, sanitized_query, error_message = await sanitize_play_query(query, str(ctx.author.id))
+        if not is_safe:
+            await ctx.send(f"Sanitizing results: {error_message}")
+            return
+
+        # Check voice connection
+        if not await self._ensure_voice_connection(ctx):
+            return
+
+        try:
+            # Handle search result selection
+            query = await self._handle_search_selection(ctx, query)
+            if query is None:
+                return
+
+            # Don't allow playlists
+            if "playlist" in query or "list=" in query:
+                await ctx.send("❌ Play Now command doesn't support playlists. Use regular play command instead!")
+                return
+
+            # Process track and insert at position 0
+            track_info, _ = await self._process_track(ctx, query, position=0)
+            
+            if track_info:
+                await ctx.send(f"Playing now: {track_info['title']}")
+                
+                # Stop current track if playing
+                if ctx.voice_client and ctx.voice_client.is_playing():
+                    ctx.voice_client.stop()
+                else:
+                    await self.play_next(ctx)
+
+        except Exception as e:
+            logger.error(f"Error in playnow command: {str(e)}")
             await ctx.send(f'❌ Error: {str(e)}')
 
     @commands.command(name='similar')
@@ -524,6 +593,72 @@ class Music(commands.Cog):
             await ctx.send("👋 Left the voice channel.")
         else:
             await ctx.send("❌ I'm not in a voice channel!")
+                 
+    @commands.command(name='helpm')
+    async def helpm(self, ctx):
+        """Display all available music commands and their usage"""
+        embed = discord.Embed(
+            title="🎵 MusicAI Commands",
+            description="Here are all available music commands:",
+            color=discord.Color.blue()
+        )
+
+        # Main playback commands
+        embed.add_field(
+            name="▶️ Playback Commands",
+            value="""
+    `!play` (or `!p`) `<song/URL>`: Play a song or add it to queue
+    `!playnow` (or `!pn`) `<song/URL>`: Play a song immediately
+    `!next`: Skip to the next song
+    `!stop`: Stop playback and clear queue
+    """,
+            inline=False
+        )
+
+        # Queue management
+        embed.add_field(
+            name="📋 Queue Management",
+            value="""
+    `!queue`: Display current queue
+    `!similar` `[number]`: Add similar songs to current track (default: 5)
+    """,
+            inline=False
+        )
+
+        # Search commands
+        embed.add_field(
+            name="🔎 Search Commands",
+            value="""
+    `!search` `<query>`: Search for songs
+    `!play <number>`: Play a song from search results
+    """,
+            inline=False
+        )
+
+        # Voice channel commands
+        embed.add_field(
+            name="🎤 Voice Channel Commands",
+            value="""
+    `!join`: Join your voice channel
+    `!leave`: Leave voice channel
+    """,
+            inline=False
+        )
+
+        # Tips section
+        embed.add_field(
+            name="💡 Tips",
+            value="""
+    • You can play songs by name, URL, or playlist URL
+    • Use `!playnow` to skip the queue
+    • Search results are numbered - use the number with !play
+    """,
+            inline=False
+        )
+
+        embed.set_footer(text="Need more help? Ask a moderator!")
+        
+        await ctx.send(embed=embed)
             
 async def setup(bot):
     await bot.add_cog(Music(bot))
