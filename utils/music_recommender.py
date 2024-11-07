@@ -45,6 +45,8 @@ class MusicRecommender:
         title = re.sub(r'\(Official Video\)', '', title)
         title = re.sub(r'\(Video.*?\)', '', title)
         title = re.sub(r'\[Video.*?\]', '', title)
+        title = re.sub(r"\s*\(.*?\)", "", title)
+        title = re.sub(r"\s*\[.*?\]", "", title)
         
         # Try to split by common separators
         for separator in [' - ', ' – ', ' — ']:

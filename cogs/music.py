@@ -5,6 +5,7 @@ from discord.ext import commands
 import asyncio
 from services.music_queue import QueueManager, Track
 from services.youtube import YouTubeService
+from utils.query_sanitizer import sanitize_play_query
 from utils.ytdl_source import YTDLSource, auto_reconnect
 from utils.music_recommender import MusicRecommender
 from config.settings import CHUNK_SIZE, LASTFM_API_KEY, LASTFM_API_SECRET, LASTFM_USERNAME, LASTFM_PASSWORD
@@ -267,6 +268,11 @@ class Music(commands.Cog):
         """Play a song by URL, search result number, or playlist URL"""
         logger.info(f"Play command received with query: {query}")
 
+        is_safe, sanitized_query, error_message = await sanitize_play_query(query, str(ctx.author.id))
+        if not is_safe:
+            await ctx.send(f"Sanitizing results: {error_message}")
+            return
+        
         # Check voice channel first
         if not ctx.message.author.voice:
             await ctx.send("❌ You must be in a voice channel to play music!")
@@ -376,8 +382,13 @@ class Music(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name='search')
-    async def search(self, ctx, *, query):
+    async def search(self, ctx, *, query: str):
         """Search for videos on YouTube and display results"""
+        is_safe, sanitized_query, error_message = await sanitize_play_query(query, str(ctx.author.id))
+        if not is_safe:
+            await ctx.send(f"Sanitizing results: {error_message}")
+            return
+        
         try:
             results = await self.youtube_service.parallel_search(query)
             
