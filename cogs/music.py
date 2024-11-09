@@ -661,6 +661,35 @@ class Music(commands.Cog):
         
         await ctx.send(embed=embed)
         
+    @commands.Cog.listener('on_voice_state_update')
+    async def on_voice_state_update(self, member, before, after):
+        """Event handler for voice state updates"""
+        # Ignore bot's own voice state updates
+        if member == self.bot.user:
+            return
+        
+        # Check if the member left a channel
+        if before.channel and not after.channel:
+            # Get the voice channel the bot is in
+            for voice_client in self.bot.voice_clients:
+                # Get current channel members directly from voice_client.channel
+                if voice_client.channel == before.channel:
+                    current_channel = voice_client.channel
+                    # Count remaining members (excluding bots)
+                    remaining_members = len([
+                        m for m in current_channel.members 
+                        if not m.bot
+                    ])
+                    
+                    # If no human members remain, disconnect the bot
+                    if remaining_members == 0:
+                        await voice_client.disconnect()
+                        # Try to find a text channel to send notification
+                        if isinstance(current_channel.guild.system_channel, discord.TextChannel):
+                            await current_channel.guild.system_channel.send(
+                                f"All users left the voice channel. I'm leaving too!"
+                            )
+        
     @commands.Cog.listener('on_command_error')
     async def error_handler(self, ctx, error):
         if isinstance(error, commands.CommandNotFound):
