@@ -1,4 +1,5 @@
 import time
+import difflib
 from typing import Optional
 import discord
 from discord.ext import commands
@@ -659,6 +660,95 @@ class Music(commands.Cog):
         embed.set_footer(text="Need more help? Ask a moderator!")
         
         await ctx.send(embed=embed)
+        
+    @commands.Cog.listener('on_command_error')
+    async def error_handler(self, ctx, error):
+        if isinstance(error, commands.CommandNotFound):
+            # Get the command that was attempted
+            attempted_command = ctx.message.content.split()[0][len(ctx.prefix):].lower()
             
+            # Get list of all available commands
+            available_commands = [cmd.name for cmd in self.bot.commands]
+            
+            # Find similar commands using difflib
+            similar_commands = difflib.get_close_matches(
+                attempted_command, 
+                available_commands, 
+                n=3,  # Number of suggestions
+                cutoff=0.6  # Similarity threshold (0-1)
+            )
+            
+            # Create an embedded message
+            embed = discord.Embed(
+                title="Command Not Found",
+                color=discord.Color.orange()
+            )
+            embed.add_field(
+                name="Error",
+                value=f"The command `{attempted_command}` was not found.",
+                inline=False
+            )
+            
+            # Add suggestions if any were found
+            if similar_commands:
+                suggestions = "\n".join([f"`{cmd}`" for cmd in similar_commands])
+                embed.add_field(
+                    name="Did you mean:",
+                    value=suggestions,
+                    inline=False
+                )
+            
+            # Add help information
+            embed.add_field(
+                name="Need help?",
+                value=f"Type `{ctx.prefix}helpm` to see all available commands.",
+                inline=False
+            )
+            
+            # Log the error
+            logger.warning(
+                f"CommandNotFound: User {ctx.author} ({ctx.author.id}) "
+                f"attempted to use unknown command '{attempted_command}' "
+                f"in channel #{ctx.channel.name} ({ctx.channel.id})"
+            )
+            
+            await ctx.send(embed=embed)
+            
+        elif isinstance(error, commands.MissingPermissions):
+            embed = discord.Embed(
+                title="Permission Error",
+                description="You don't have the required permissions to use this command.",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed)
+            
+        elif isinstance(error, commands.MissingRequiredArgument):
+            embed = discord.Embed(
+                title="Missing Argument",
+                description=f"Missing required argument: {error.param.name}",
+                color=discord.Color.red()
+            )
+            embed.add_field(
+                name="Usage",
+                value=f"`{ctx.prefix}{ctx.command.name} {ctx.command.signature}`",
+                inline=False
+            )
+            await ctx.send(embed=embed)
+            
+        else:
+            # Log unexpected errors
+            logger.error(
+                f"Unexpected error in command '{ctx.command}' "
+                f"used by {ctx.author} ({ctx.author.id}): {str(error)}",
+                exc_info=error
+            )
+            
+            embed = discord.Embed(
+                title="An Error Occurred",
+                description="An unexpected error occurred. The bot administrator has been notified.",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed)
+                
 async def setup(bot):
     await bot.add_cog(Music(bot))
