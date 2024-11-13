@@ -4,7 +4,7 @@ from typing import Optional
 import discord
 from discord.ext import commands
 import asyncio
-from services.music_queue import QueueManager, Track
+from services.music_queue import QueueManager, QueueItem, Track
 from services.youtube import YouTubeService
 from utils.query_sanitizer import sanitize_play_query
 from utils.ytdl_source import YTDLSource, auto_reconnect
@@ -190,79 +190,126 @@ class Music(commands.Cog):
 
     async def process_playlist(self, ctx, playlist_url: str):
         try:
-            
             queue = self.queue_manager.get_queue(ctx.guild.id)
-            queue.playlist_processing = True
             start_time = time.time()
             
-            await ctx.send("🎵 Extracting playlist information...")
-            
-            # Get playlist information
-            try:
-                video_entries, total_tracks = await self.youtube_service.get_playlist_info(playlist_url)
-                if not video_entries:
-                    await ctx.send("❌ Could not find playlist entries. Make sure the playlist is public.")
+            # Initialize playlist loading if this is the first batch
+            if not queue.playlist_loader:
+                await ctx.send("🎵 Extracting playlist information...")
+                try:
+                    video_entries, total_tracks = await self.youtube_service.get_playlist_info(playlist_url)
+                    if not video_entries:
+                        await ctx.send("❌ Could not find playlist entries. Make sure the playlist is public.")
+                        return
+                    
+                    queue.start_playlist_loading(playlist_url)
+                    queue.playlist_loader.video_entries = video_entries
+                    queue.playlist_loader.total_tracks = total_tracks
+                    await ctx.send(f"Found {total_tracks} tracks in playlist. Starting processing...")
+                    
+                except Exception as e:
+                    await ctx.send(f"❌ Error getting playlist info: {str(e)}")
+                    logger.error(f"Error getting playlist info: {str(e)}")
                     return
-
-                await ctx.send(f"Found {total_tracks} tracks in playlist. Starting processing...")
-
-                # Create a semaphore to limit concurrent downloads
-                semaphore = asyncio.Semaphore(3)
+            
+            # Create a semaphore to limit concurrent downloads
+            semaphore = asyncio.Semaphore(3)
+            
+            # Calculate the batch range
+            start_idx = queue.playlist_loader.current_index
+            end_idx = min(start_idx + 10, len(queue.playlist_loader.video_entries))
+            current_batch = queue.playlist_loader.video_entries[start_idx:end_idx]
+            
+            # Skip if we've reached the end of the playlist
+            if not current_batch:
+                queue.finish_playlist_loading()
+                return
                 
-                # Process first video immediately
-                first_track = await self.youtube_service.extract_video_info(video_entries[0]['url'], semaphore)
-                if first_track:
-                    queue.add_track(Track(**first_track))
-                    if not queue.is_playing:
+            added_tracks = 0
+            skipped_tracks = 0
+            
+            # Process the batch
+            tasks = [
+                self.youtube_service.extract_video_info(entry['url'], semaphore)
+                for entry in current_batch
+            ]
+            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Process each result in the batch
+            for i, result in enumerate(batch_results):
+                if isinstance(result, Exception):
+                    skipped_tracks += 1
+                    logger.error(f"Error processing track: {str(result)}")
+                    continue
+                    
+                if result:
+                    track = Track(**result)
+                    
+                    # Add callback to the 9th track (if not the last batch)
+                    if (added_tracks == 8 and 
+                        not queue.is_playlist_complete()):
+                        queue.add_track(
+                            track,
+                            on_start=lambda: asyncio.create_task(
+                                self.load_next_batch(ctx, playlist_url)
+                            )
+                        )
+                    else:
+                        queue.add_track(track)
+                    
+                    # Start playback if this is the first track overall
+                    if (start_idx == 0 and i == 0 and not queue.is_playing):
                         queue.is_playing = True
                         await self.play_next(ctx)
-                        await ctx.send(f"🎵 Starting playback: {first_track['title']}")
-                
-                # Process remaining videos in chunks
-                remaining_entries = video_entries[1:]
-                chunks = [remaining_entries[i:i + CHUNK_SIZE] 
-                         for i in range(0, len(remaining_entries), CHUNK_SIZE)]
-
-                added_tracks = 1 if first_track else 0
-                skipped_tracks = 0
-
-                # Process each chunk
-                for chunk_index, chunk in enumerate(chunks):
-                    tasks = [
-                        self.youtube_service.extract_video_info(entry['url'], semaphore)
-                        for entry in chunk
-                    ]
-                    chunk_results = await asyncio.gather(*tasks, return_exceptions=True)
+                        await ctx.send(f"🎵 Starting playback: {result['title']}")
                     
-                    for result in chunk_results:
-                        if isinstance(result, Exception):
-                            skipped_tracks += 1
-                            continue
-                            
-                        if result:
-                            queue.add_track(Track(**result))
-                            added_tracks += 1
-                        else:
-                            skipped_tracks += 1
-
-                    # Progress update
-                    if (chunk_index + 1) % 2 == 0 or chunk_index == len(chunks) - 1:
-                        await ctx.send(f"✅ Progress: {added_tracks}/{total_tracks} tracks added")
-
-                processing_time = time.time() - start_time
+                    added_tracks += 1
+                else:
+                    skipped_tracks += 1
+            
+            # Update the current index
+            queue.playlist_loader.current_index = end_idx
+            
+            # Send progress update
+            current, total = queue.get_playlist_progress()
+            processing_time = time.time() - start_time
+            
+            # If this is the last batch, send final summary
+            if queue.is_playlist_complete():
                 await ctx.send(
                     f"✅ Finished processing playlist!\n"
+                    f"Progress: {current}/{total} tracks\n"
+                    f"Added in this batch: {added_tracks}\n"
+                    f"Skipped in this batch: {skipped_tracks}\n"
+                    f"Time taken: {processing_time:.2f} seconds"
+                )
+                queue.finish_playlist_loading()
+            else:
+                await ctx.send(
+                    f"✅ Loaded batch of tracks ({start_idx + 1} to {end_idx})\n"
+                    f"Progress: {current}/{total} tracks\n"
                     f"Added: {added_tracks} tracks\n"
                     f"Skipped: {skipped_tracks} tracks\n"
                     f"Time taken: {processing_time:.2f} seconds"
                 )
+                
+        except Exception as e:
+            await ctx.send(f"❌ Error processing playlist: {str(e)}")
+            logger.error(f"Error processing playlist: {str(e)}")
+            queue.finish_playlist_loading()
 
-            except Exception as e:
-                await ctx.send(f"❌ Error processing playlist: {str(e)}")
-                logger.error(f"Error processing playlist: {str(e)}")
-
-        finally:
-            queue.playlist_processing = False
+    async def load_next_batch(self, ctx, playlist_url: str):
+        """Helper method to load the next batch of tracks"""
+        queue = self.queue_manager.get_queue(ctx.guild.id)
+        
+        # Check if we need and can load more tracks
+        if (not queue.is_playlist_complete() and 
+            not queue.playlist_loader.is_loading):
+            try:
+                queue.playlist_loader.is_loading = True
+                await self.process_playlist(ctx, playlist_url)
+            finally:
+                queue.playlist_loader.is_loading = False
 
 
     async def _ensure_voice_connection(self, ctx):
@@ -317,7 +364,7 @@ class Music(commands.Cog):
                 track = Track(**track_info)
 
                 if position is not None:
-                    queue.queue.insert(position, track)
+                    queue.queue.insert(position, QueueItem(track))
                 else:
                     queue.add_track(track)
 
@@ -510,11 +557,11 @@ class Music(commands.Cog):
 
         # Add queued tracks (up to 10)
         queue_list = list(queue.queue)
-        for i, track in enumerate(queue_list[:10], 1):
-            duration_min = int(track.duration // 60)
-            duration_sec = int(track.duration % 60)
+        for i, q_item in enumerate(queue_list[:10], 1):
+            duration_min = int(q_item.track.duration // 60)
+            duration_sec = int(q_item.track.duration % 60)
             embed.add_field(
-                name=f"{i}. {track.title}",
+                name=f"{i}. {q_item.track.title}",
                 value=f"Duration: {duration_min}:{duration_sec:02d}",
                 inline=False
             )
