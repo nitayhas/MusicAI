@@ -605,14 +605,36 @@ class Music(commands.Cog):
         else:
             await ctx.send("❌ Nothing is playing!")
 
-    @commands.command(name='next')
-    async def next(self, ctx):
-        """Skip to the next song in the queue"""
+    @commands.command(name='skip', aliases=['skipkip'])
+    async def next(self, ctx, amount: str = "1"):
+        try:
+            skip_amount = int(amount)
+        except ValueError:
+            await ctx.send("❌ Please provide a valid number!")
+            return
+
+        if skip_amount < 1:
+            await ctx.send("❌ Please provide a positive number!")
+            return
+
+        # Get the guild's queue
+        queue = self.queue_manager.get_queue(ctx.guild.id)
+        
+        if not queue.is_playing:
+            await ctx.send("❌ Nothing is playing!")
+            return
+
+        # Skip tracks and get the result
+        tracks_skipped = queue.skip_tracks(skip_amount)
+        
+        # Stop the current audio
         if ctx.voice_client and ctx.voice_client.is_playing():
-            ctx.voice_client.stop()  # This will trigger the after callback and play the next song
+            ctx.voice_client.stop()
+        
+        if tracks_skipped == 1:
             await ctx.send("⏭️ Skipped to next song.")
         else:
-            await ctx.send("❌ Nothing is playing!")
+            await ctx.send(f"⏭️ Skipped {tracks_skipped} songs.")
 
     @commands.command(name='join')
     async def join(self, ctx):
@@ -657,7 +679,7 @@ class Music(commands.Cog):
             value="""
     `!play` (or `!p`) `<song/URL>`: Play a song or add it to queue
     `!playnow` (or `!pn`) `<song/URL>`: Play a song immediately
-    `!next`: Skip to the next song
+    `!skip`: Skip to the next song
     `!stop`: Stop playback and clear queue
     """,
             inline=False

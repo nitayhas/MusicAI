@@ -55,6 +55,40 @@ class MusicQueue:
         queue_item = QueueItem(track=track, callback_id=callback_id)
         self.queue.append(queue_item)
 
+    def skip_tracks(self, amount: int = 1) -> tuple[int, Optional[Track]]:
+        """
+        Skip a specified number of tracks in the queue
+        
+        Args:
+            amount (int): Number of tracks to skip (default: 1)
+            
+        Returns:
+            tuple[int, Optional[Track]]: A tuple containing:
+                - The actual number of tracks skipped
+                - The next track to play (None if queue is empty after skip)
+        """
+        if amount < 1:
+            raise ValueError("Skip amount must be positive")
+
+        # Calculate how many tracks we can actually skip
+        queue_length = len(self.queue)
+        actual_skip = min(amount - 1, queue_length)  # -1 because we're not counting the current track
+        
+        # Execute callbacks for all skipped tracks
+        for _ in range(actual_skip):
+            queue_item = self.queue.popleft()
+            if queue_item.callback_id and queue_item.callback_id in self._callbacks:
+                callback = self._callbacks.pop(queue_item.callback_id)
+                try:
+                    callback()
+                except Exception as e:
+                    print(f"Error executing track callback: {e}")
+        
+        # Calculate total tracks skipped (including current track)
+        tracks_skipped = actual_skip + 1 if self.current_track else actual_skip
+        
+        return tracks_skipped
+
     def get_next_track(self) -> Optional[Track]:
         """Get the next track and execute its callback if it exists"""
         if not self.queue:
