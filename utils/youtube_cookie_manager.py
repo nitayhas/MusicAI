@@ -1,6 +1,9 @@
 import os
-import tempfile
+import uuid
 import time
+import random
+import string
+import tempfile
 from http.cookiejar import MozillaCookieJar, Cookie
 
 class YoutubeCookieManager:
@@ -10,31 +13,45 @@ class YoutubeCookieManager:
         self.cookie_jar = None
         self.last_creation_time = 0
         self.cookie_lifetime = 3600  # 1 hour in seconds
+        self.device_id = str(uuid.uuid4())
+
+    def _generate_visitor_id(self) -> str:
+        return ''.join(random.choices(string.ascii_letters + string.digits, k=11))
 
     def _create_cookie_jar(self) -> MozillaCookieJar:
-        """Create a new cookie jar with YouTube cookies"""
         current_time = int(time.time())
-        future_time = current_time + 365 * 24 * 60 * 60  # 1 year from now
+        future_time = current_time + 365 * 24 * 60 * 60
+        visitor_id = self._generate_visitor_id()
         
         cookies = [
             {
                 'name': 'CONSENT',
-                'value': f'YES+yt.452525252.en+FX+{current_time}',
+                'value': f'YES+cb.20220301-11-p0.en-GB+FX+{current_time}',
                 'domain': '.youtube.com'
             },
             {
                 'name': 'VISITOR_INFO1_LIVE',
-                'value': 'xH_GYVxNCl0',
+                'value': visitor_id,
                 'domain': '.youtube.com'
             },
             {
                 'name': 'PREF',
-                'value': 'hl=en&tz=UTC',
+                'value': 'hl=en&gl=US',
                 'domain': '.youtube.com'
             },
             {
-                'name': 'GPS',
-                'value': '1',
+                'name': '_gcl_au',
+                'value': '1.1.548239985.1674856835',
+                'domain': '.youtube.com'
+            },
+            {
+                'name': 'DEVICE_INFO',
+                'value': self.device_id,
+                'domain': '.youtube.com'
+            },
+            {
+                'name': 'VISITOR_PRIVACY_METADATA',
+                'value': 'CgJVUxICGgA=',
                 'domain': '.youtube.com'
             }
         ]
@@ -66,18 +83,13 @@ class YoutubeCookieManager:
         return cookie_jar
 
     def get_cookie_file(self) -> str:
-        """Get the path to a valid cookie file, creating new one if needed"""
         current_time = time.time()
         
-        # Check if we need to create new cookies
         if (self.cookie_file is None or 
             not os.path.exists(self.cookie_file) or 
             current_time - self.last_creation_time > self.cookie_lifetime):
             
-            # Clean up old cookie file if it exists
             self.cleanup()
-            
-            # Create new cookie file
             self.cookie_file = os.path.join(
                 self.temp_dir, 
                 f'youtube_cookies_{int(current_time)}.txt'
@@ -89,7 +101,6 @@ class YoutubeCookieManager:
         return self.cookie_file
 
     def cleanup(self) -> None:
-        """Remove the temporary cookie file if it exists"""
         if self.cookie_file and os.path.exists(self.cookie_file):
             try:
                 os.remove(self.cookie_file)
@@ -99,21 +110,37 @@ class YoutubeCookieManager:
                 print(f"Error cleaning up cookie file: {e}")
 
     def get_yt_dlp_options(self) -> dict:
-        """Get yt-dlp options with cookie configuration"""
         return {
             'quiet': False,
             'no_warnings': False,
             'cookiefile': self.get_cookie_file(),
             'extract_flat': True,
             'format': 'bestaudio/best',
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['ios'],
+                    'player_skip': ['webpage', 'config', 'js'],
+                    'innertube_client': ['ios'],
+                    'skip': ['dash', 'hls'],
+                }
+            },
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Mobile/15E148 Safari/604.1',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-us,en;q=0.5',
-                'Sec-Fetch-Mode': 'navigate'
-            }
+                'Accept-Language': 'en-us',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive',
+                'X-YouTube-Client-Name': '2',
+                'X-YouTube-Client-Version': '17.42.7',
+                'Origin': 'https://m.youtube.com',
+                'Referer': 'https://m.youtube.com/'
+            },
+            'ap_muted': True,
+            'prefer_insecure': False,
+            'geo_bypass': True,
+            'geo_bypass_country': 'US',
+            'socket_timeout': 30
         }
 
     def __del__(self):
-        """Cleanup when the object is destroyed"""
         self.cleanup()
