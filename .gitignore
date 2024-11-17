@@ -163,3 +163,4 @@ cython_debug/
 
 bot.py
 bot.log
+*token*.json
