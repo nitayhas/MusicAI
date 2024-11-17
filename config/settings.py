@@ -1,6 +1,7 @@
 import os
 import pylast
 from dotenv import load_dotenv
+from utils.youtube_cookie_manager import YoutubeCookieManager
 
 # Load environment variables
 load_dotenv()
@@ -14,6 +15,8 @@ LASTFM_API_KEY = os.getenv('LASTFM_API_KEY')
 LASTFM_API_SECRET = os.getenv('LASTFM_API_SECRET')
 LASTFM_USERNAME = os.getenv('LASTFM_USERNAME')
 LASTFM_PASSWORD = pylast.md5(os.getenv('LASTFM_PASSWORD'))
+
+youtube_cookie_manager = YoutubeCookieManager()
 
 YTDL_FORMAT_OPTIONS = {
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
@@ -36,10 +39,12 @@ YTDL_FORMAT_OPTIONS = {
     # 'skip_unavailable_fragments': True,
     # 'postprocessor_args': ['-threads', '1'],  # Single thread for stability
     
-    # Authentication options
-    'username': 'oauth',  # Use OAuth authentication
-    'password': '',       # Password should be empty for OAuth
-    'oauth_token': YOUTUBE_OAUTH_TOKEN,
+    # # Authentication options
+    # 'username': 'oauth',  # Use OAuth authentication
+    # 'password': '',       # Password should be empty for OAuth
+    # 'oauth_token': YOUTUBE_OAUTH_TOKEN,
+    
+    'cookiefile': youtube_cookie_manager.get_cookie_file()
 }
 
 INITIAL_PLAYLIST_YTDL_FORMAT_OPTIONS = {
