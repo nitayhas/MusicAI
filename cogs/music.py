@@ -5,9 +5,9 @@ import discord
 from discord.ext import commands
 import asyncio
 from services.music_queue import QueueManager, QueueItem, Track
-from services.youtube import YouTubeService
+from services.youtube_v2 import YouTubeService
 from utils.query_sanitizer import sanitize_play_query
-from utils.ytdl_source import YTDLSource, auto_reconnect
+from utils.ytdl_source_v2 import YTDLSource, auto_reconnect
 from utils.music_recommender import MusicRecommender
 from config.settings import CHUNK_SIZE, LASTFM_API_KEY, LASTFM_API_SECRET, LASTFM_USERNAME, LASTFM_PASSWORD
 import logging

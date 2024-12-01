@@ -27,7 +27,7 @@ YTDL_FORMAT_OPTIONS = {
     'logtostderr': False,
     'quiet': True,
     'no_warnings': True,
-    'default_search': 'auto',
+    'default_search': 'ytsearch2',
     'extract_flat': False,
     # Network and quality options
     'source_address': '0.0.0.0',
